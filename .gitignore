@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+.ruff_cache/
+*.pyc
+proxies.txt
+results*.csv
+*.har
