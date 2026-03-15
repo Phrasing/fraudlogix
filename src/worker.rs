@@ -28,6 +28,14 @@ pub async fn check_proxy_with_retries(proxy_str: &str, tag: &str) -> CsvRecord {
     for attempt in 0..=MAX_RETRIES {
         if attempt > 0 {
             let delay = backoff.next_delay();
+            eprintln!(
+                "[RETRY] {} (attempt {}/{}, waiting {:.1}s): {}",
+                &proxy.original[..proxy.original.len().min(60)],
+                attempt,
+                MAX_RETRIES,
+                delay.as_secs_f64(),
+                last_error
+            );
             tokio::time::sleep(delay).await;
         }
 
