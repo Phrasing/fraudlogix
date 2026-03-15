@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 # HTTP client with Chrome emulation
 wreq = "6.0.0-rc.28"
-wreq-util = "3.0.0-rc.10"
+wreq-util = { version = "3.0.0-rc.10", features = ["tower-delay"] }
 
 # Async runtime
 tokio = { version = "1.42", features = ["rt-multi-thread", "macros", "time", "sync"] }

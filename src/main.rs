@@ -6,6 +6,20 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, Semaphore};
 
+#[derive(Default)]
+struct Statistics {
+    risk_low: usize,
+    risk_medium: usize,
+    risk_high: usize,
+    risk_extreme: usize,
+    risk_error: usize,
+    risk_rate_limited: usize,
+    flag_proxy: usize,
+    flag_vpn: usize,
+    flag_tor: usize,
+    flag_datacenter: usize,
+}
+
 #[derive(Parser)]
 #[command(name = "fraudlogix-checker")]
 #[command(about = "Bulk proxy IP fraud score checker")]
@@ -118,22 +132,51 @@ async fn main() -> anyhow::Result<()> {
         proxies.len(),
     )?));
 
+    let stats = Arc::new(Mutex::new(Statistics::default()));
     let semaphore = Arc::new(Semaphore::new(args.concurrency));
     let mut handles = vec![];
 
     for proxy in proxies {
         let sem = Arc::clone(&semaphore);
         let writer = Arc::clone(&writer);
+        let stats = Arc::clone(&stats);
         let tag = args.tag.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
 
             let record = worker::check_proxy_with_retries(&proxy, &tag).await;
-            let is_error = record.result.risk_score == "ERROR";
+            let is_error = record.risk_score == "ERROR";
+
+            // Update statistics
+            let mut stats_guard = stats.lock().await;
+            match record.risk_score.as_str() {
+                "Low" => stats_guard.risk_low += 1,
+                "Medium" => stats_guard.risk_medium += 1,
+                "High" => stats_guard.risk_high += 1,
+                "Extreme" => stats_guard.risk_extreme += 1,
+                "ERROR" => stats_guard.risk_error += 1,
+                "RATE_LIMITED" => stats_guard.risk_rate_limited += 1,
+                _ => {}
+            }
+            if record.proxy_flag == "true" || record.proxy_flag == "True" {
+                stats_guard.flag_proxy += 1;
+            }
+            if record.vpn == "true" || record.vpn == "True" {
+                stats_guard.flag_vpn += 1;
+            }
+            if record.tor == "true" || record.tor == "True" {
+                stats_guard.flag_tor += 1;
+            }
+            if record.data_center == "true" || record.data_center == "True" {
+                stats_guard.flag_datacenter += 1;
+            }
+            drop(stats_guard);
 
             let mut writer_guard = writer.lock().await;
-            writer_guard.write_record(&record);
+            if let Err(e) = writer_guard.write_record(&record) {
+                eprintln!("Error writing to CSV: {}", e);
+            }
             writer_guard.increment_done(is_error);
 
             // Get progress and release lock before printing
@@ -146,20 +189,20 @@ async fn main() -> anyhow::Result<()> {
                     done,
                     total,
                     proxy,
-                    &record.result.ip[..record.result.ip.len().min(80)]
+                    &record.ip[..record.ip.len().min(80)]
                 );
             } else {
                 let flags: Vec<&str> = ["Proxy", "VPN", "TOR", "DataCenter"]
                     .iter()
                     .filter(|&&k| match k {
                         "Proxy" => {
-                            record.result.proxy_flag == "true" || record.result.proxy_flag == "True"
+                            record.proxy_flag == "true" || record.proxy_flag == "True"
                         }
-                        "VPN" => record.result.vpn == "true" || record.result.vpn == "True",
-                        "TOR" => record.result.tor == "true" || record.result.tor == "True",
+                        "VPN" => record.vpn == "true" || record.vpn == "True",
+                        "TOR" => record.tor == "true" || record.tor == "True",
                         "DataCenter" => {
-                            record.result.data_center == "true"
-                                || record.result.data_center == "True"
+                            record.data_center == "true"
+                                || record.data_center == "True"
                         }
                         _ => false,
                     })
@@ -177,10 +220,10 @@ async fn main() -> anyhow::Result<()> {
                     done,
                     total,
                     proxy,
-                    record.result.ip,
-                    record.result.risk_score,
+                    record.ip,
+                    record.risk_score,
                     flags_str,
-                    record.result.pow_solve_ms
+                    record.pow_solve_ms
                 );
             }
         });
@@ -192,8 +235,13 @@ async fn main() -> anyhow::Result<()> {
         handle.await?;
     }
 
-    let writer_guard = writer.lock().await;
+    let mut writer_guard = writer.lock().await;
     let (done, _, errors) = writer_guard.get_progress();
+
+    // Explicitly flush the CSV writer before program exit.
+    if let Err(e) = writer_guard.flush() {
+        eprintln!("Error flushing CSV file: {}", e);
+    }
     drop(writer_guard);
 
     let elapsed = start.elapsed().as_secs_f64();
@@ -203,6 +251,49 @@ async fn main() -> anyhow::Result<()> {
         "\nDone! {} results -> {} ({} errors) in {:.1}s ({:.1}/s)",
         done, args.output, errors, elapsed, rate
     );
+
+    // Print statistics summary
+    let stats_guard = stats.lock().await;
+    println!("\n=== Summary ===");
+    println!("Risk Scores:");
+    if stats_guard.risk_low > 0 {
+        println!("  Low:          {}", stats_guard.risk_low);
+    }
+    if stats_guard.risk_medium > 0 {
+        println!("  Medium:       {}", stats_guard.risk_medium);
+    }
+    if stats_guard.risk_high > 0 {
+        println!("  High:         {}", stats_guard.risk_high);
+    }
+    if stats_guard.risk_extreme > 0 {
+        println!("  Extreme:      {}", stats_guard.risk_extreme);
+    }
+    if stats_guard.risk_error > 0 {
+        println!("  ERROR:        {}", stats_guard.risk_error);
+    }
+    if stats_guard.risk_rate_limited > 0 {
+        println!("  RATE_LIMITED: {}", stats_guard.risk_rate_limited);
+    }
+
+    let total_flags = stats_guard.flag_proxy
+        + stats_guard.flag_vpn
+        + stats_guard.flag_tor
+        + stats_guard.flag_datacenter;
+    if total_flags > 0 {
+        println!("\nFlags:");
+        if stats_guard.flag_proxy > 0 {
+            println!("  Proxy:      {}", stats_guard.flag_proxy);
+        }
+        if stats_guard.flag_vpn > 0 {
+            println!("  VPN:        {}", stats_guard.flag_vpn);
+        }
+        if stats_guard.flag_tor > 0 {
+            println!("  TOR:        {}", stats_guard.flag_tor);
+        }
+        if stats_guard.flag_datacenter > 0 {
+            println!("  DataCenter: {}", stats_guard.flag_datacenter);
+        }
+    }
 
     Ok(())
 }

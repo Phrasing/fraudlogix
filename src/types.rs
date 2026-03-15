@@ -158,8 +158,46 @@ pub struct FraudResult {
 pub struct CsvRecord {
     pub tag: String,
     pub proxy: String,
-    #[serde(flatten)]
-    pub result: FraudResult,
+    #[serde(rename = "IP")]
+    pub ip: String,
+    #[serde(rename = "RiskScore")]
+    pub risk_score: String,
+    #[serde(skip)]
+    pub pow_solve_ms: f64,
+    #[serde(rename = "RecentlySeen")]
+    pub recently_seen: String,
+    #[serde(rename = "ConnectionType")]
+    pub connection_type: String,
+    #[serde(rename = "Proxy")]
+    pub proxy_flag: String,
+    #[serde(rename = "VPN")]
+    pub vpn: String,
+    #[serde(rename = "TOR")]
+    pub tor: String,
+    #[serde(rename = "DataCenter")]
+    pub data_center: String,
+    #[serde(rename = "SearchEngineBot")]
+    pub search_engine_bot: String,
+    #[serde(rename = "MaskedDevices")]
+    pub masked_devices: String,
+    #[serde(rename = "AbnormalTraffic")]
+    pub abnormal_traffic: String,
+    #[serde(rename = "ASN")]
+    pub asn: String,
+    #[serde(rename = "ISP")]
+    pub isp: String,
+    #[serde(rename = "Organization")]
+    pub organization: String,
+    #[serde(rename = "City")]
+    pub city: String,
+    #[serde(rename = "Region")]
+    pub region: String,
+    #[serde(rename = "Country")]
+    pub country: String,
+    #[serde(rename = "CountryCode")]
+    pub country_code: String,
+    #[serde(rename = "Timezone")]
+    pub timezone: String,
 }
 
 #[derive(Error, Debug)]
@@ -193,7 +231,15 @@ impl CheckError {
                 let msg = e.to_string().to_lowercase();
                 msg.contains("eof") || msg.contains("unexpected end")
             }
-            CheckError::InvalidResponse(msg) => msg.contains("Empty IP"),
+            CheckError::InvalidResponse(msg) => {
+                // Retry if empty IP response
+                if msg.contains("Empty IP") {
+                    return true;
+                }
+
+                // Retry on 5xx server errors (500, 502, 503, 504, etc.)
+                msg.contains("failed with status 5")
+            }
             CheckError::HttpError(_) => true,
         }
     }

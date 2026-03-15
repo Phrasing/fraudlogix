@@ -7,10 +7,8 @@
 extern "C" {
 #endif
 
-int SolvePowCuda(const char* nonce, int nonce_len,
-                 const char* challenge_key, int challenge_key_len,
-                 uint32_t difficulty, uint64_t max_attempts,
-                 uint64_t* result_counter);
+int SolvePowCuda(const char* nonce, int nonce_len, const char* challenge_key, int challenge_key_len,
+                 uint32_t difficulty, uint64_t max_attempts, uint64_t* result_counter);
 
 int CudaAvailable();
 

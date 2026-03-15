@@ -56,9 +56,10 @@ impl CsvWriter {
         })
     }
 
-    pub fn write_record(&mut self, record: &CsvRecord) {
-        let _ = self.writer.serialize(record);
-        let _ = self.writer.flush();
+    pub fn write_record(&mut self, record: &CsvRecord) -> anyhow::Result<()> {
+        self.writer.serialize(record)?;
+        self.writer.flush()?;
+        Ok(())
     }
 
     pub fn increment_done(&mut self, is_error: bool) {
@@ -70,5 +71,10 @@ impl CsvWriter {
 
     pub fn get_progress(&self) -> (usize, usize, usize) {
         (self.done, self.total, self.errors)
+    }
+
+    pub fn flush(&mut self) -> anyhow::Result<()> {
+        self.writer.flush()?;
+        Ok(())
     }
 }
