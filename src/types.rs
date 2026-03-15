@@ -240,7 +240,11 @@ impl CheckError {
                 // Retry on 5xx server errors (500, 502, 503, 504, etc.)
                 msg.contains("failed with status 5")
             }
-            CheckError::HttpError(_) => true,
+            CheckError::HttpError(e) => {
+                let msg = e.to_string();
+                // Don't retry proxy connection errors (wrong credentials or proxy down)
+                !msg.contains("ProxyConnect")
+            }
         }
     }
 

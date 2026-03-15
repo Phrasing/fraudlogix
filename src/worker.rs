@@ -1,6 +1,5 @@
 use crate::backoff::ExponentialBackoff;
 use crate::client::FraudlogixClient;
-use crate::fallback_ip::FallbackIpDetector;
 use crate::types::*;
 
 const MAX_RETRIES: u32 = 6;
@@ -43,7 +42,6 @@ pub async fn check_proxy_with_retries(proxy_str: &str, tag: &str) -> CsvRecord {
 
     let mut backoff = ExponentialBackoff::new();
     let mut last_error = String::new();
-    let mut fallback_ip: Option<String> = None;
 
     for attempt in 0..=MAX_RETRIES {
         if attempt > 0 {
@@ -93,12 +91,6 @@ pub async fn check_proxy_with_retries(proxy_str: &str, tag: &str) -> CsvRecord {
                     if !e.is_retryable() {
                         break;
                     }
-
-                    if attempt == MAX_RETRIES && fallback_ip.is_none() {
-                        if let Ok(detector) = FallbackIpDetector::new(&proxy) {
-                            fallback_ip = detector.detect_ip().await;
-                        }
-                    }
                 }
             },
             Err(e) => {
@@ -108,38 +100,6 @@ pub async fn check_proxy_with_retries(proxy_str: &str, tag: &str) -> CsvRecord {
                 }
             }
         }
-    }
-
-    if let Some(ip) = fallback_ip {
-        let rate_limited = FraudResult {
-            ip,
-            risk_score: "RATE_LIMITED".to_string(),
-            ..Default::default()
-        };
-        return CsvRecord {
-            tag: tag.to_string(),
-            proxy: proxy.original.clone(),
-            ip: rate_limited.ip,
-            risk_score: rate_limited.risk_score,
-            pow_solve_ms: 0.0,
-            recently_seen: rate_limited.recently_seen,
-            connection_type: rate_limited.connection_type,
-            proxy_flag: rate_limited.proxy_flag,
-            vpn: rate_limited.vpn,
-            tor: rate_limited.tor,
-            data_center: rate_limited.data_center,
-            search_engine_bot: rate_limited.search_engine_bot,
-            masked_devices: rate_limited.masked_devices,
-            abnormal_traffic: rate_limited.abnormal_traffic,
-            asn: rate_limited.asn,
-            isp: rate_limited.isp,
-            organization: rate_limited.organization,
-            city: rate_limited.city,
-            region: rate_limited.region,
-            country: rate_limited.country,
-            country_code: rate_limited.country_code,
-            timezone: rate_limited.timezone,
-        };
     }
 
     let final_error = FraudResult {
